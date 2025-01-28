@@ -80,28 +80,27 @@ io.on("connection", (socket) => {
       `[${new Date().toISOString()}] 🔍 ${socket.id} is looking for chat`
     );
 
-    // Remove from any existing chat
-    if (activeChats.has(socket.id)) {
-      const partnerId = activeChats.get(socket.id);
-      activeChats.delete(socket.id);
-      activeChats.delete(partnerId);
-      io.to(partnerId).emit("peer-disconnected");
-      users.set(partnerId, { status: "online", joinedAt: Date.now() });
-    }
-
-    // Remove from waiting if already there
-    waitingUsers.delete(socket.id);
-
-    // Get available users
+    // Get available users that are actually still connected
     const availableUsers = Array.from(waitingUsers).filter((id) => {
-      // Don't match with self or users already in chat
-      return id !== socket.id && !activeChats.has(id);
+      return (
+        id !== socket.id &&
+        !activeChats.has(id) &&
+        users.has(id) && // Make sure user still exists
+        users.get(id).status === "waiting"
+      ); // Make sure they're actually waiting
     });
 
     if (availableUsers.length > 0) {
       // Randomly select a partner from available users
       const randomIndex = Math.floor(Math.random() * availableUsers.length);
       const partnerId = availableUsers[randomIndex];
+
+      // Double check if partner is still connected
+      if (!users.has(partnerId)) {
+        waitingUsers.delete(partnerId);
+        socket.emit("waiting");
+        return;
+      }
 
       console.log(
         `[${new Date().toISOString()}] ✅ Matching ${
@@ -154,26 +153,31 @@ io.on("connection", (socket) => {
     io.to(to).emit("signal", { signal, from: socket.id });
   });
 
-  socket.on("user-disconnected", () => {
+  socket.on("disconnect", () => {
     console.log(
-      `[${new Date().toISOString()}] 🔌 User disconnected:`,
+      `[${new Date().toISOString()}] 👋 User disconnected:`,
       socket.id
     );
 
-    // Remove from any existing chat
+    // Remove from active chats and notify partner
     if (activeChats.has(socket.id)) {
       const partnerId = activeChats.get(socket.id);
       activeChats.delete(socket.id);
       activeChats.delete(partnerId);
       io.to(partnerId).emit("peer-disconnected");
-      users.set(partnerId, { status: "online", joinedAt: Date.now() });
+      // Update partner status to online
+      if (users.has(partnerId)) {
+        users.set(partnerId, { status: "online", joinedAt: Date.now() });
+      }
     }
 
     // Remove from waiting list
     waitingUsers.delete(socket.id);
-    users.set(socket.id, { status: "online", joinedAt: Date.now() });
 
-    // Update user counts
+    // Remove user completely
+    users.delete(socket.id);
+
+    // Update user counts for everyone
     io.emit("users-count", {
       total: users.size,
       waiting: waitingUsers.size,
@@ -215,6 +219,58 @@ if (process.env.NODE_ENV === "production") {
     res.sendFile(path.join(__dirname, "../client", "dist", "index.html"));
   });
 }
+
+// Add a periodic cleanup function to remove stale users
+const cleanupInterval = setInterval(() => {
+  const now = Date.now();
+  const staleTimeout = 30000; // 30 seconds
+
+  // Clean up users who haven't had activity
+  for (const [socketId, userData] of users.entries()) {
+    if (
+      now - userData.joinedAt > staleTimeout &&
+      userData.status !== "chatting"
+    ) {
+      users.delete(socketId);
+      waitingUsers.delete(socketId);
+    }
+  }
+
+  // Clean up any waiting users that no longer exist in users Map
+  for (const socketId of waitingUsers) {
+    if (!users.has(socketId)) {
+      waitingUsers.delete(socketId);
+    }
+  }
+
+  // Clean up any active chats where one or both users no longer exist
+  for (const [socketId, partnerId] of activeChats.entries()) {
+    if (!users.has(socketId) || !users.has(partnerId)) {
+      if (users.has(socketId)) {
+        users.set(socketId, { status: "online", joinedAt: Date.now() });
+      }
+      if (users.has(partnerId)) {
+        users.set(partnerId, { status: "online", joinedAt: Date.now() });
+      }
+      activeChats.delete(socketId);
+      activeChats.delete(partnerId);
+    }
+  }
+
+  // Update everyone with the new counts
+  io.emit("users-count", {
+    total: users.size,
+    waiting: waitingUsers.size,
+    chatting: activeChats.size / 2,
+  });
+}, 10000); // Run every 10 seconds
+
+// Clean up the interval when the server shuts down
+process.on("SIGTERM", () => {
+  clearInterval(cleanupInterval);
+  // ... other cleanup code ...
+});
+
 // Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
