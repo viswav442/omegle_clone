@@ -9,7 +9,13 @@ const io = new Server(server, {
     transports: ["websocket", "polling"],
   },
   allowEIO3: true,
+  path: "/socket.io/",
+  serveClient: false,
   pingTimeout: 60000,
+  pingInterval: 25000,
+  upgradeTimeout: 30000,
+  agent: false,
+  rejectUnauthorized: false,
 });
 
 // Add error handling for socket connections
