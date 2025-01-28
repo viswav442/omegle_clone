@@ -1,9 +1,40 @@
+const express = require("express");
+const app = express();
+const path = require("path");
+
+// Add CSP headers middleware
+app.use((req, res, next) => {
+  // Get the host from the request
+  const host = req.get("host");
+  const wsProtocol = process.env.NODE_ENV === "production" ? "wss" : "ws";
+  const httpProtocol = process.env.NODE_ENV === "production" ? "https" : "http";
+
+  res.setHeader(
+    "Content-Security-Policy",
+    `default-src 'self'; ` +
+      `connect-src 'self' ${wsProtocol}://${host} ${httpProtocol}://${host} ws: wss: http: https: *; ` +
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval'; ` +
+      `style-src 'self' 'unsafe-inline'; ` +
+      `media-src 'self' blob: mediastream:; ` +
+      `img-src 'self' blob: data:;`
+  );
+
+  // Add other necessary security headers
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+
+  next();
+});
+
+// Serve static files in production
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(path.join(__dirname, "../client/dist")));
+}
+
 const io = new Server(server, {
   cors: {
-    origin:
-      process.env.NODE_ENV === "production"
-        ? true // Allow all origins in production
-        : "http://localhost:5173",
+    origin: true,
     methods: ["GET", "POST"],
     credentials: true,
     transports: ["websocket", "polling"],
@@ -13,9 +44,6 @@ const io = new Server(server, {
   serveClient: false,
   pingTimeout: 60000,
   pingInterval: 25000,
-  upgradeTimeout: 30000,
-  agent: false,
-  rejectUnauthorized: false,
 });
 
 // Add error handling for socket connections
@@ -33,3 +61,10 @@ io.on("connection", (socket) => {
 server.on("error", (error) => {
   console.error("Server error:", error);
 });
+
+// Make sure this comes after all other routes
+if (process.env.NODE_ENV === "production") {
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "../client/dist/index.html"));
+  });
+}
