@@ -12,6 +12,11 @@ export default defineConfig({
         secure: false,
         ws: true, // Enable WebSocket proxying
       },
+      "/socket.io": {
+        target: process.env.VITE_API_URL || "http://localhost:5000",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   build: {
