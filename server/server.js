@@ -8,7 +8,9 @@ const setupSecurity = require("./middleware/security");
 const errorHandler = require("./middleware/errorHandler");
 const config = require("./config/config");
 const Chat = require("./models/Chat");
+const path = require("path");
 
+// const __dirname = path.resolve();
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
@@ -186,6 +188,13 @@ app.get("/health", (req, res) => {
 
 // Error handling
 app.use(errorHandler);
+
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(path.join(__dirname, "../client/dist")));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "../client/dist/index.html"));
+  });
+}
 
 // Start server
 const PORT = process.env.PORT || 5000;
