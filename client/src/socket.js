@@ -1,28 +1,26 @@
-import io from "socket.io-client";
+import { io } from "socket.io-client";
 
-// In production, socket will connect to the same URL as the app
-const SOCKET_URL = import.meta.env.PROD ? "" : "http://localhost:5000";
+const ENDPOINT = import.meta.env.PROD
+  ? window.location.origin.replace(/^http/, "ws") // Use WebSocket in production
+  : "http://localhost:8080";
 
-const socket = io(SOCKET_URL, {
+export const socket = io(ENDPOINT, {
+  transports: ["websocket", "polling"],
+  reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  reconnection: true,
-  reconnectionAttempts: 10,
-  transports: ["websocket"],
-  agent: false,
-  upgrade: false,
-  rejectUnauthorized: false,
+  autoConnect: true,
+  withCredentials: true,
 });
 
+// Add connection event listeners
 socket.on("connect", () => {
-  console.log("Connected to server with ID:", socket.id);
+  console.log("Connected to server");
 });
 
 socket.on("connect_error", (error) => {
-  console.error("Socket connection error:", error);
+  console.error("Connection error:", error);
 });
 
 socket.on("disconnect", (reason) => {
   console.log("Disconnected:", reason);
 });
-
-export { socket };
